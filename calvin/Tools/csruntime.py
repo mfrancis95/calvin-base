@@ -27,6 +27,28 @@ import socket
 _conf = None
 _log = None
 
+# CoAP
+from coapthon.resources.resource import Resource
+from coapthon.server.coap import CoAP
+
+class TestResource(Resource):
+
+    def __init__(self, name = 'TestResource', coap_server = None):
+        super(TestResource, self).__init__(name, coap_server, visible = True, observable = True, allow_children = True)
+        self.payload = 'Hello World'
+        self.resource_type = 'rt1'
+        self.content_type = 'text/plain'
+        self.interface_Type = 'if1'
+
+    def render_GET(self, request):
+        return self
+
+class CoAPServer(CoAP):
+
+    def __init__(self, host, port):
+        CoAP.__init__(self, (host, port))
+        self.add_resource('test/', TestResource())
+        print 'CoAP Server start on ' + host + ':' + str(port)
 
 
 def parse_arguments():
@@ -424,6 +446,15 @@ def main():
     # If still no name give it "no_name" name
     if not 'name' in runtime_attr.setdefault("indexed_public",{}).setdefault("node_name",{}):
         runtime_attr["indexed_public"]["node_name"]['name'] = "no_name"
+
+    # CoAP
+    server = CoAPServer('0.0.0.0', 5683)
+    try:
+        server.listen()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.close()
 
     if app_info:
         dispatch_and_deploy(app_info, args.wait, uris, control_uri, runtime_attr, credentials_)
