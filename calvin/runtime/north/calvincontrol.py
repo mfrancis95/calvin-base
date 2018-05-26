@@ -37,6 +37,9 @@ from control_apis import registry_api
 from control_apis import uicalvinsys_api
 from control_apis import proxyhandler_api
 
+# CoAP Control Server
+from control_apis import coap_api
+
 _log = get_logger(__name__)
 
 _calvincontrol = None
@@ -240,6 +243,10 @@ class CalvinControlTunnelServer(object):
         self.controltunnels = {}
         # Register for incoming control proxy requests
         self.node.proto.register_tunnel_handler("control", CalvinCB(self.tunnel_request_handles))
+        # Start CoAP Server
+        print 'Starting CoAP Control Server'
+        coap_api.CoAPServer(node).start()
+
 
     def stop(self):
         for _, control in self.controltunnels.items():
