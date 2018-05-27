@@ -96,6 +96,9 @@ class CalvinControl(object):
 
             # Create tunnel server
             self.tunnel_server = CalvinControlTunnelServer(self.node)
+        # Start CoAP Server
+        _log.info('CoAP Control API started.')
+        coap_api.CoAPServer(node).start()
 
     def stop(self):
         """ Stop """
@@ -243,9 +246,6 @@ class CalvinControlTunnelServer(object):
         self.controltunnels = {}
         # Register for incoming control proxy requests
         self.node.proto.register_tunnel_handler("control", CalvinCB(self.tunnel_request_handles))
-        # Start CoAP Server
-        print 'Starting CoAP Control Server'
-        coap_api.CoAPServer(node).start()
 
 
     def stop(self):
