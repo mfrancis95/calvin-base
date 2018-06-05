@@ -1,27 +1,25 @@
-from txthings import coap, resource
+from txthings import resource
+from txthings.coap import Coap, COAP_PORT, CONTENT, Message
 from json import dumps
-from twisted.internet import defer, reactor
+from twisted.internet.defer import succeed
+from twisted.internet.reactor import listenUDP
 
-node = None
+class _ActorsResource(resource.CoAPResource):
 
-class ActorsResource(resource.CoAPResource):
-
-    def __init__(self):
+    def __init__(self, node):
         resource.CoAPResource.__init__(self)
+        self.node = node
 
     def render_GET(self, request):
-        global node
-        actors = node.am.list_actors()
-        response = coap.Message(code = coap.CONTENT, payload = dumps(actors))
-        return defer.succeed(response)
+        actors = self.node.am.list_actors()
+        response = Message(code = CONTENT, payload = dumps(actors))
+        return succeed(response)
 
 class CoAPServer:
 
-    def __init__(self, the_node):
-        global node
-        node = the_node
+    def __init__(self, node):
         self.root = resource.CoAPResource()
-        self.root.putChild('actors', ActorsResource())
+        self.root.putChild('actors', _ActorsResource(node))
 
     def start(self):
-        reactor.listenUDP(coap.COAP_PORT, coap.Coap(resource.Endpoint(self.root)))
+        listenUDP(COAP_PORT, Coap(resource.Endpoint(self.root)))
