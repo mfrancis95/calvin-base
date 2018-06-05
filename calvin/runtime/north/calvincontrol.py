@@ -38,7 +38,7 @@ from control_apis import uicalvinsys_api
 from control_apis import proxyhandler_api
 
 # CoAP Control Server
-from control_apis import coap_api
+from plugins.coap import coap_server
 
 _log = get_logger(__name__)
 
@@ -98,7 +98,7 @@ class CalvinControl(object):
             self.tunnel_server = CalvinControlTunnelServer(self.node)
         # Start CoAP Server
         _log.info('CoAP Control API started.')
-        coap_api.CoAPServer(node).start()
+        coap_server.CoAPServer(node).start()
 
     def stop(self):
         """ Stop """
