@@ -15,9 +15,8 @@
 # limitations under the License.
 
 import time
-from collections import deque
-from socket import error as socket_error
 import opcua
+from socket import error as socket_error
 from calvin.runtime.south.plugins.async import async, threads
 from calvin.runtime.south.calvinsys import base_calvinsys_object
 from calvin.utilities.calvinlogger import get_logger
@@ -54,7 +53,6 @@ class ChangeHandler(object):
                 if not sourcets :
                     sourcets = serverts
             return {
-                # "type": data_value.Value.VariantType.name,
                 "value": val,
                 "status": data_value.StatusCode.value,
                 "sourcets": sourcets,
@@ -82,7 +80,7 @@ class ChangeHandler(object):
         # I have no idea what this is
         _log.info("OPCUA Status change: {}".format(status))
 
-class Source(base_calvinsys_object.BaseCalvinsysObject):
+class TaggedSource(base_calvinsys_object.BaseCalvinsysObject):
     """
     Connect to OPCUA server and subscribe to configured parameters
     """
@@ -90,6 +88,10 @@ class Source(base_calvinsys_object.BaseCalvinsysObject):
     init_schema = {
         "type": "object",
         "properties": {
+            "topic": {
+                "description": "topic to publish parameters under",
+                "type": "string"
+            },
             "endpoint": {
                 "description": "OPC-UA endpoint uri (opc.tcp://<ip:port>)",
                 "type": "string"
@@ -116,12 +118,7 @@ class Source(base_calvinsys_object.BaseCalvinsysObject):
             "reconnect_interval": {
                 "description": "Rate, in seconds, which to attempt reconnect on connection failures",
                 "type": "integer",
-                "minimum": 10
-            },
-            "logging_interval": {
-                "description": "Log some statistics at given intervals",
-                "type": "number",
-                "minimum": 30
+                "minimum": 1
             }
         },
         "required": ["endpoint", "namespace", "timeout", "monitoring_interval", "paramconfig"],
@@ -134,61 +131,42 @@ class Source(base_calvinsys_object.BaseCalvinsysObject):
     }
 
     read_schema = {
-        "description": "Get next changed parameter",
-        "type": "array",
-        "items": {
-            "type": "object"
-        }
+        "description": "Get list of changed parameters",
+        "type": "object"
     }
 
 
-    def init(self, endpoint, paramconfig, namespace, timeout, monitoring_interval, logging_interval=None, reconnect_interval=60, tags=None):
+    def init(self, endpoint, paramconfig, namespace, timeout, monitoring_interval, reconnect_interval=5, topic="", **kwargs):
         #pylint: disable=W0201
-        self.values = deque()
+        self.values = {}
         self.running = False
         self.data_changed = False
         self.client = None
         self.watchdog = None
         self.retry_connection = None
         self.subscription = None
-        self.stat_logger = None
-
-        if logging_interval:
-            def show_stats():
-                incoming = self.stats["incoming"]
-                speed_in = self.stats["current_in"]/logging_interval
-                outgoing = self.stats["outgoing"]
-                speed_out = self.stats["current_out"]/logging_interval
-                _log.info("{} - incoming {} ({}/sec), sent: {} ({}/sec)".format(endpoint, incoming, speed_in, outgoing, speed_out))
-                self.stats["current_in"] = 0
-                self.stats["current_out"] = 0
-                if self.stat_logger:
-                    self.stat_logger.reset()
-
-            self.stats = {"incoming": 0, "outgoing": 0, "current_in": 0, "current_out": 0}
-            self.stat_logger = async.DelayedCall(logging_interval, show_stats)
 
         def notify_change(value):
             if not self.running:
                 # In the process of closing down, just drop it.
                 return
+            import json
             self.data_changed = True
             value["calvints"] = time.time()
-            value["id"] = "ns=" + namespace + ";" + paramconfig[value["tag"]]["address"]
-            self.values.append(value)
-            if self.stat_logger:
-                self.stats["incoming"] += 1
-                self.stats["current_in"] += 1
+            # value["id"] = paramconfig[value["tag"]]["address"]
+            # address = paramconfig[value["tag"]]["address"]
+            tag = value.pop("tag")
+            param_id = tag
+            self.values.setdefault(topic + param_id, []).append(value)
             self.scheduler_wakeup()
 
         def watchdog(parameter):
             def check_connection():
                 try:
-                    _log.info("Watchdog triggered - checking connection")
                     node = self.client.get_node(parameter)
                     node.get_data_value()
                 except Exception as e:
-                    _log.info("Check connection error: {}".format(e))
+                    _log.info("Error: {}".format(e))
                     return True
                 return False
 
@@ -203,6 +181,7 @@ class Source(base_calvinsys_object.BaseCalvinsysObject):
                     # Error getting value from server, reset connection
                     _log.warning("Connection check failed, resetting connection")
                     setup()
+
 
             if not self.running:
                 _log.info("Client not running, shutting down watchdog")
@@ -237,8 +216,7 @@ class Source(base_calvinsys_object.BaseCalvinsysObject):
                 namespace_idx = client.get_namespace_index(namespace)
             except ValueError:
                 # @TODO Inform user?
-                _log.error("Server has no namspace %s" % (namespace,))
-                raise FatalException("Server has no namespace %s" % (namespace,))
+                raise FatalException("Server has no namespace %s" % (namespace))
 
             # Build node-ids for parameters
             parameters = {"ns={};{}".format(namespace_idx, str(desc["address"])) : str(tag) for tag, desc in paramconfig.items()}
@@ -263,14 +241,6 @@ class Source(base_calvinsys_object.BaseCalvinsysObject):
             return client, parameters.keys()[0], subscription
 
         def connect_and_subscribe():
-            if self.client:
-                try:
-                    # if already connected, unsubscribe and disconnect
-                    _log.info("Disconnecting due to reconnect")
-                    self.client.disconnect()
-                except Exception as e:
-                    _log.info("Error during disconnect from %s: %s" % (endpoint, e))
-
             try:
                 error = False
                 client = opcua.Client(endpoint)
@@ -281,7 +251,6 @@ class Source(base_calvinsys_object.BaseCalvinsysObject):
             except NonFatalException as e:
                 error = True
                 _log.warning("Nonfatal error during connection to %s: %s" % (endpoint, e))
-                _log.info("Connection retry in {} seconds".format(reconnect_interval))
                 async.DelayedCall(reconnect_interval, setup)
             except Exception as e:
                 # For unhandled exceptions, we assume them to be fatal
@@ -289,7 +258,6 @@ class Source(base_calvinsys_object.BaseCalvinsysObject):
                 _log.error("Unhandled exception during connection to %s: %s" % (endpoint, e))
             finally:
                 if error and client:
-                    _log.error("Error occured - disconnecting")
                     client.disconnect()
 
         def setup_done((client, parameter, subscription)):
@@ -298,20 +266,27 @@ class Source(base_calvinsys_object.BaseCalvinsysObject):
             self.running = True
             self.watchdog = async.DelayedCall(timeout, watchdog, parameter)
             # All set - alert the scheduler
-            _log.info("Setup complete")
             self.scheduler_wakeup()
 
         def setup_failed(failure):
-            _log.info("Setup of connection to {} failed - retrying in {}".format(endpoint, reconnect_interval))
-            async.DelayedCall(reconnect_interval, setup)
-            self.scheduler_wakeup()
+            pass
 
         def setup():
-            _log.info("(Re-)setting connection")
+            def disconnect(client):
+                _log.info("Disconnecting")
+                try:
+                    client.disconnect()
+                except Exception as e:
+                    _log.error("Disconnect from %s failed: %s" % (endpoint, e))
+
+            if self.client:
+                async.call_in_thread(disconnect, self.client)
+                self.client = None
+
+            _log.info("Resetting connection")
             defer = threads.defer_to_thread(connect_and_subscribe)
             defer.addCallback(setup_done)
             defer.addErrback(setup_failed)
-
         setup()
 
         # can_read <-
@@ -323,25 +298,16 @@ class Source(base_calvinsys_object.BaseCalvinsysObject):
         return self.running and len(self.values) > 0
 
     def read(self):
-        values = list(self.values)
-        self.values.clear()
-        if self.stat_logger:
-            self.stats["outgoing"] += len(values)
-            self.stats["current_out"] += len(values)
+        values = self.values
+        self.values = {}
         return values
 
     def close(self):
         self.running = False
-        if self.stat_logger:
-            self.stat_logger.cancel()
-            self.statlogger = None
         if self.watchdog:
             self.watchdog.cancel()
-            self.watchdog = None
         if self.retry_connection:
             self.retry_connection.cancel()
-            self.retry_connection = None
-
         if self.client:
             self.client.disconnect()
 
