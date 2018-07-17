@@ -22,6 +22,8 @@ from calvin.utilities.calvinlogger import get_logger
 
 _log = get_logger(__name__)
 
+coap_routes = []
+
 _routes = {}
 _methods = []
 _docs = []
@@ -46,8 +48,7 @@ path_regex = {
     "trace_id": trace_uuid_re,
     "node_id": node_uuid_re,
     "policy_id": policy_uuid_re,
-    "path": path_re,
-    # "ident": ident_re
+    "path": path_re
 }
 
 def handler(method, path, optional=None):
@@ -64,6 +65,7 @@ def handler(method, path, optional=None):
             opts=opts,
             end=r"\s+HTTP/1")
         _methods.append(func)
+        coap_routes.append((method, path, opts, func))
         return func
     return wrap
 
@@ -81,6 +83,15 @@ def methods():
 def docs():
     return "\n\n".join(_docs)
 
+def install_coap_handlers(target, control):
+    route_helpers = []
+    for (method, path, opts, func) in coap_routes:
+        helper_name = func.__name__[len("handle"):]
+        if hasattr(control, helper_name):
+            helper = getattr(control, helper_name)
+            target.add_route(method, path, opts, helper)
+    return route_helpers
+
 def install_handlers(target):
     routes = []
     for f in _methods:
@@ -88,4 +99,3 @@ def install_handlers(target):
         if f in _routes:
             routes.append((re.compile(_routes[f]), getattr(target, f.__name__)))
     return routes
-

@@ -30,7 +30,7 @@ from calvin.runtime.north import replicationmanager
 from calvin.runtime.north import appmanager
 from calvin.runtime.north import scheduler
 from calvin.runtime.north import storage
-from calvin.runtime.north import calvincontrol
+from calvin.runtime.north import calvincontrol, calvincontrolcoap
 from calvin.runtime.north.certificate_authority import certificate_authority
 from calvin.runtime.north.authentication import authentication
 from calvin.runtime.north.authorization import authorization
@@ -112,6 +112,7 @@ class Node(object):
         self.am = actormanager.ActorManager(self)
         self.rm = replicationmanager.ReplicationManager(self)
         self.control = calvincontrol.get_calvincontrol()
+        self.coapcontrol = calvincontrolcoap.get_coapcontrol(node = self)
 
         # _scheduler = scheduler.DebugScheduler if _log.getEffectiveLevel() <= logging.DEBUG else scheduler.Scheduler
         # _scheduler = scheduler.NonPreemptiveScheduler
@@ -241,6 +242,8 @@ class Node(object):
         else:
             if self.control_uri is not None:
                 self.control.start(node=self, uri=self.control_uri, external_uri=self.external_control_uri)
+        # start COAP control API
+        self.coapcontrol.start() # TO DO: Address?
 
     def stop(self, callback=None):
         # TODO: Handle blocking in poorly implemented calvinsys/runtime south.
