@@ -30,6 +30,10 @@ from calvin.utilities.replication_defs import PRE_CHECK, REPLICATION_STATUS
 
 _log = get_logger(__name__)
 
+@register
+def _get_applications(self):
+    return self.node.app_manager.list_applications()
+
 @handler(method="GET", path="/applications")
 @authentication_decorator
 def handle_get_applications(self, handle, connection, match, data, hdr):
@@ -39,7 +43,7 @@ def handle_get_applications(self, handle, connection, match, data, hdr):
     Response status code: OK
     Response: List of application ids
     """
-    self.send_response(handle, connection, json.dumps(self.node.app_manager.list_applications()))
+    self.send_response(handle, connection, json.dumps(self._get_applications()))
 
 @handler(method="DELETE", path="/application/{application_id}")
 @authentication_decorator
@@ -96,6 +100,9 @@ def handle_new_actor(self, handle, connection, match, data, hdr):
     self.send_response(
         handle, connection, None if actor_id is None else json.dumps({'actor_id': actor_id}), status=status)
 
+@register
+def _get_actors(self):
+    return self.node.am.list_actors()
 
 @handler(method="GET", path="/actors")
 @authentication_decorator
@@ -106,9 +113,7 @@ def handle_get_actors(self, handle, connection, match, data, hdr):
     Response status code: OK
     Response: list of actor ids
     """
-    actors = self.node.am.list_actors()
-    self.send_response(
-        handle, connection, json.dumps(actors))
+    self.send_response(handle, connection, json.dumps(self._get_actors()))
 
 @handler(method="DELETE", path="/actor/{actor_id}")
 @authentication_decorator
